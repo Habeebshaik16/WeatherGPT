@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 
@@ -30,7 +29,7 @@ class AppLanguageOption {
 
 class AppLanguageController extends ChangeNotifier {
   AppLanguageController({
-    this.baseUrl = 'http://127.0.0.1:8000',
+    this.baseUrl = 'https://weathergpt-y8dx.onrender.com',
   });
 
   final String baseUrl;

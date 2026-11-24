@@ -58,8 +58,8 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
 
   final List<String> _lastDiscussedLocations = [];
 
-  static const String _apiUrl = 'http://127.0.0.1:8000/chat';
-  static const String _speakApiUrl = 'http://127.0.0.1:8000/speak';
+  static const String _apiUrl = 'https://weathergpt-y8dx.onrender.com/chat';
+  static const String _speakApiUrl = 'https://weathergpt-y8dx.onrender.com/speak';
 
   String _t(String value) {
     if (!mounted) return value;

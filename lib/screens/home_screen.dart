@@ -1,6 +1,8 @@
+
 import 'package:flutter/material.dart';
 import '../models/weather_model.dart';
 import '../services/weather_service.dart';
+import '../services/app_language.dart';
 import '../widgets/weather_background.dart';
 import '../widgets/weather_header.dart';
 import '../widgets/weather_card.dart';
@@ -40,6 +42,10 @@ class _HomeScreenState extends State<HomeScreen> {
   WeatherModel? _weather;
   bool _isLoading = true;
   String? _error;
+
+  String _t(String value) {
+    return AppLanguageScope.of(context).text(value);
+  }
 
   @override
   void initState() {
@@ -176,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _SearchLocation(
                         location: widget.location,
                         onTap: widget.onLocationTap,
+                        translate: _t,
                       ),
 
                       const SizedBox(height: 22),
@@ -191,6 +198,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _ErrorCard(
                           message: _error!,
                           onRetry: _loadWeather,
+                          translate: _t,
                         )
                       else if (_weather != null)
                         WeatherCard(
@@ -199,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           condition: _weather!.condition,
                           feelsLike:
-                              'Feels like ${_temperatureText(_weather!.feelsLike)}',
+                              '${_t('Feels like')} ${_temperatureText(_weather!.feelsLike)}',
                           humidity: '${_weather!.humidity}%',
                           wind: '${_weather!.windSpeed.round()} km/h',
                           rainChance: '${_weather!.rainChance}%',
@@ -208,8 +216,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 28),
 
                       _SectionHeader(
-                        title: 'Ask WeatherGPT',
-                        actionText: 'Open AI',
+                        title: _t('Ask WeatherGPT'),
+                        actionText: _t('Open AI'),
                         onActionTap: () {
                           _askWeatherGPT(
                             'Tell me about the weather in ${widget.location}.',
@@ -220,17 +228,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 12),
 
                       QuickQuestion(
-                        question: 'Will it rain today?',
+                        question: _t('Will it rain today?'),
                         icon: Icons.cloudy_snowing,
                         onTap: () {
-                          _askWeatherGPT('Will it rain today?');
+                          _askWeatherGPT(
+                            'Will it rain today?',
+                          );
                         },
                       ),
 
                       const SizedBox(height: 10),
 
                       QuickQuestion(
-                        question: 'What should I wear today?',
+                        question: _t('What should I wear today?'),
                         icon: Icons.checkroom_rounded,
                         onTap: () {
                           _askWeatherGPT(
@@ -242,7 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 10),
 
                       QuickQuestion(
-                        question: 'What will the weather be tomorrow?',
+                        question: _t('What will the weather be tomorrow?'),
                         icon: Icons.calendar_month_rounded,
                         onTap: () {
                           _askWeatherGPT(
@@ -256,8 +266,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       _GlassSection(
                         isDark: isDark,
                         child: _weather == null
-                            ? const Center(
-                                child: Text('Forecast unavailable'),
+                            ? Center(
+                                child: Text(
+                                  _t('Forecast unavailable'),
+                                ),
                               )
                             : ForecastCard(
                                 weather: _weather!,
@@ -279,9 +291,11 @@ class _HomeScreenState extends State<HomeScreen> {
 class _SearchLocation extends StatelessWidget {
   final String location;
   final VoidCallback? onTap;
+  final String Function(String) translate;
 
   const _SearchLocation({
     required this.location,
+    required this.translate,
     this.onTap,
   });
 
@@ -317,7 +331,7 @@ class _SearchLocation extends StatelessWidget {
 
               Expanded(
                 child: Text(
-                  'Change location · $location',
+                  '${translate('Change location')} · $location',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -346,10 +360,12 @@ class _SearchLocation extends StatelessWidget {
 class _ErrorCard extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final String Function(String) translate;
 
   const _ErrorCard({
     required this.message,
     required this.onRetry,
+    required this.translate,
   });
 
   @override
@@ -376,7 +392,7 @@ class _ErrorCard extends StatelessWidget {
             ElevatedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Try again'),
+              label: Text(translate('Try again')),
             ),
           ],
         ),
