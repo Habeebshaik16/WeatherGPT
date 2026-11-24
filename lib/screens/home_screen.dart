@@ -1,4 +1,6 @@
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/weather_model.dart';
 import '../services/weather_service.dart';
@@ -39,9 +41,14 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final WeatherService _weatherService = WeatherService();
 
+  static const Duration _refreshInterval = Duration(minutes: 15);
+
   WeatherModel? _weather;
   bool _isLoading = true;
+  bool _isFetching = false;
   String? _error;
+
+  Timer? _weatherTimer;
 
   String _t(String value) {
     return AppLanguageScope.of(context).text(value);
@@ -50,7 +57,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+
     _loadWeather();
+
+    _weatherTimer = Timer.periodic(_refreshInterval, (_) {
+      if (mounted) {
+        _loadWeather(showLoading: false);
+      }
+    });
   }
 
   @override
@@ -76,11 +90,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${_convertTemperature(celsius).round()}${widget.temperatureUnit}';
   }
 
-  Future<void> _loadWeather() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadWeather({bool showLoading = true}) async {
+    if (_isFetching || !mounted) return;
+
+    _isFetching = true;
+
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
 
     try {
       final lat = widget.latitude;
@@ -105,6 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _weather = result;
         _isLoading = false;
+        _error = null;
       });
 
       widget.onWeatherLoaded?.call(result);
@@ -114,10 +135,15 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
         _isLoading = false;
-        _weather = null;
       });
 
-      widget.onWeatherLoaded?.call(null);
+      // Keep the previous successful weather data if a background
+      // refresh temporarily fails.
+      if (_weather == null) {
+        widget.onWeatherLoaded?.call(null);
+      }
+    } finally {
+      _isFetching = false;
     }
   }
 
@@ -148,6 +174,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void dispose() {
+    _weatherTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -161,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
         isNight: _weather?.isNight ?? false,
         child: SafeArea(
           child: RefreshIndicator(
-            onRefresh: _loadWeather,
+            onRefresh: () => _loadWeather(),
             child: CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
@@ -194,10 +226,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             child: CircularProgressIndicator(),
                           ),
                         )
-                      else if (_error != null)
+                      else if (_error != null && _weather == null)
                         _ErrorCard(
                           message: _error!,
-                          onRetry: _loadWeather,
+                          onRetry: () => _loadWeather(),
                           translate: _t,
                         )
                       else if (_weather != null)
@@ -231,9 +263,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         question: _t('Will it rain today?'),
                         icon: Icons.cloudy_snowing,
                         onTap: () {
-                          _askWeatherGPT(
-                            'Will it rain today?',
-                          );
+                          _askWeatherGPT('Will it rain today?');
                         },
                       ),
 
@@ -243,9 +273,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         question: _t('What should I wear today?'),
                         icon: Icons.checkroom_rounded,
                         onTap: () {
-                          _askWeatherGPT(
-                            'What should I wear today?',
-                          );
+                          _askWeatherGPT('What should I wear today?');
                         },
                       ),
 
@@ -326,9 +354,7 @@ class _SearchLocation extends StatelessWidget {
                 Icons.search_rounded,
                 color: Color(0xFF3F7CFF),
               ),
-
               const SizedBox(width: 12),
-
               Expanded(
                 child: Text(
                   '${translate('Change location')} · $location',
@@ -342,7 +368,6 @@ class _SearchLocation extends StatelessWidget {
                   ),
                 ),
               ),
-
               Icon(
                 Icons.location_on_outlined,
                 color: theme.colorScheme.onSurface.withValues(
@@ -379,16 +404,12 @@ class _ErrorCard extends StatelessWidget {
               Icons.cloud_off_rounded,
               size: 40,
             ),
-
             const SizedBox(height: 12),
-
             Text(
               message,
               textAlign: TextAlign.center,
             ),
-
             const SizedBox(height: 12),
-
             ElevatedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded),
@@ -427,7 +448,6 @@ class _SectionHeader extends StatelessWidget {
             color: theme.colorScheme.onSurface,
           ),
         ),
-
         TextButton(
           onPressed: onActionTap,
           child: Text(actionText),

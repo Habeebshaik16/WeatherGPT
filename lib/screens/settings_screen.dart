@@ -1,12 +1,14 @@
 
 import 'package:flutter/material.dart';
 import '../services/app_language.dart';
+import '../services/weather_alert_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
   final ValueChanged<bool> onDarkModeChanged;
   final String temperatureUnit;
   final ValueChanged<String> onTemperatureUnitChanged;
+  final WeatherAlertService alertService;
 
   const SettingsScreen({
     super.key,
@@ -14,6 +16,7 @@ class SettingsScreen extends StatefulWidget {
     required this.onDarkModeChanged,
     required this.temperatureUnit,
     required this.onTemperatureUnitChanged,
+    required this.alertService,
   });
 
   @override
@@ -23,6 +26,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool voiceEnabled = true;
   bool weatherAlerts = true;
+  bool _alertsInitialized = false;
+  bool _alertBusy = false;
 
   final TextEditingController _valueController =
       TextEditingController();
@@ -33,6 +38,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _languageQuery = '';
   String _from = '°C';
   String _to = '°F';
+
+  final Map<String, String> _categoryNames = {
+    'storms': 'Thunderstorms and hail',
+    'rain': 'Heavy rain',
+    'heat': 'Extreme heat',
+    'cold': 'Extreme cold',
+    'wind': 'Strong winds',
+    'fog': 'Fog and poor visibility',
+    'snow': 'Snow and ice',
+    'dust': 'Dust and sandstorms',
+  };
+
+  final Map<String, IconData> _categoryIcons = {
+    'storms': Icons.thunderstorm_rounded,
+    'rain': Icons.water_drop_rounded,
+    'heat': Icons.wb_sunny_rounded,
+    'cold': Icons.ac_unit_rounded,
+    'wind': Icons.air_rounded,
+    'fog': Icons.cloud_rounded,
+    'snow': Icons.cloudy_snowing,
+    'dust': Icons.blur_on_rounded,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAlerts();
+  }
+
+  Future<void> _initializeAlerts() async {
+    await widget.alertService.initialize();
+
+    if (!mounted) return;
+
+    setState(() {
+      weatherAlerts = widget.alertService.enabled;
+      _alertsInitialized = true;
+    });
+  }
 
   @override
   void dispose() {
@@ -52,6 +96,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _from == '°C'
         ? (value * 9 / 5) + 32
         : (value - 32) * 5 / 9;
+  }
+
+  Future<void> _toggleWeatherAlerts(bool value) async {
+    if (_alertBusy) return;
+
+    setState(() {
+      _alertBusy = true;
+    });
+
+    final permissionGranted =
+        await widget.alertService.setEnabled(value);
+
+    if (!mounted) return;
+
+    setState(() {
+      weatherAlerts = value;
+      _alertBusy = false;
+    });
+
+    if (value && !permissionGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Notifications are not permitted. Allow notifications in your browser settings.',
+          ),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value
+                ? 'Weather alerts enabled'
+                : 'Weather alerts disabled',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _toggleCategory(
+    String category,
+    bool value,
+  ) async {
+    await widget.alertService.setCategory(category, value);
+
+    if (!mounted) return;
+
+    setState(() {});
   }
 
   void _chooseTemperatureUnit() {
@@ -214,6 +307,71 @@ class _SettingsScreenState extends State<SettingsScreen> {
           color: Color(0xFF3F7CFF),
         ),
       ),
+    );
+  }
+
+  Widget _buildAlertCategories(String Function(String) t) {
+    final categories = widget.alertService.categories;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      child: weatherAlerts
+          ? Container(
+              margin: const EdgeInsets.only(top: 4, bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .outline
+                      .withValues(alpha: 0.12),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t('Alert Categories'),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    t('Choose which weather conditions you want to be notified about.'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ..._categoryNames.entries.map((entry) {
+                    final category = entry.key;
+                    final enabled = categories[category] ?? true;
+
+                    return SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: Icon(
+                        _categoryIcons[category],
+                        color: const Color(0xFF3F7CFF),
+                      ),
+                      title: Text(
+                        t(entry.value),
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      value: enabled,
+                      onChanged: (value) {
+                        _toggleCategory(category, value);
+                      },
+                    );
+                  }),
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
     );
   }
 
@@ -418,12 +576,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: t('Weather Alerts'),
             subtitle: t('Receive important weather warnings'),
             value: weatherAlerts,
-            onChanged: (value) {
-              setState(() {
-                weatherAlerts = value;
-              });
-            },
+            onChanged: _alertsInitialized && !_alertBusy
+                ? _toggleWeatherAlerts
+                : null,
           ),
+
+          if (!_alertsInitialized)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: LinearProgressIndicator(),
+            ),
+
+          if (_alertBusy)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: LinearProgressIndicator(),
+            ),
+
+          _buildAlertCategories(t),
 
           const SizedBox(height: 25),
 
@@ -538,7 +708,7 @@ class _SettingsSwitch extends StatelessWidget {
   final String title;
   final String subtitle;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool>? onChanged;
 
   const _SettingsSwitch({
     required this.icon,

@@ -12,6 +12,7 @@ import '../models/weather_model.dart';
 import '../services/weather_service.dart';
 import '../services/app_language.dart';
 import '../widgets/quick_question.dart';
+import '../services/chat_history_service.dart';
 
 class WeatherGPTScreen extends StatefulWidget {
   final String? initialQuestion;
@@ -35,6 +36,12 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
   final List<_ChatMessage> messages = [];
 
   final WeatherService _weatherService = WeatherService();
+  final ChatHistoryService _chatHistoryService = ChatHistoryService();
+
+  String _activeConversationId =
+      DateTime.now().microsecondsSinceEpoch.toString();
+  String _activeChatLocation = '';
+  List<Map<String, dynamic>> _savedConversations = [];
   final SpeechToText _speechToText = SpeechToText();
   final AudioPlayer _audioPlayer = AudioPlayer();
   StreamSubscription<void>? _audioCompleteSubscription;
@@ -99,9 +106,13 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
   void initState() {
     super.initState();
 
+    _activeChatLocation = widget.location;
+
     if (widget.initialQuestion != null) {
       _controller.text = widget.initialQuestion!;
     }
+
+    _loadChatHistory();
 
     _audioCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
       if (!mounted) return;
@@ -121,6 +132,251 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
       final selectedCode = AppLanguageScope.of(context).selected.code;
       _speechLocaleId = _speechInputLocaleCode(selectedCode);
     }
+  }
+
+  // --------------------------------------------------
+  // LOCAL CHAT HISTORY
+  // --------------------------------------------------
+
+  Future<void> _loadChatHistory() async {
+    final conversations = await _chatHistoryService.getConversations();
+    if (!mounted) return;
+    setState(() {
+      _savedConversations = conversations;
+    });
+  }
+
+  Future<void> _saveCurrentConversation() async {
+    final savedMessages = messages
+        .map((message) => <String, dynamic>{
+              'text': message.text,
+              'isUser': message.isUser,
+              'isError': message.isError,
+            })
+        .toList();
+
+    if (savedMessages.isEmpty) return;
+
+    final firstUserMessage = messages.firstWhere(
+      (message) => message.isUser,
+      orElse: () => _ChatMessage(text: 'New conversation', isUser: true),
+    );
+
+    final title = firstUserMessage.text.trim();
+    final location = _lastDiscussedLocations.isNotEmpty
+        ? _lastDiscussedLocations.join(', ')
+        : _activeChatLocation;
+
+    await _chatHistoryService.saveConversation(
+      id: _activeConversationId,
+      title: title.length > 55 ? '${title.substring(0, 55)}...' : title,
+      location: location,
+      messages: savedMessages,
+    );
+
+    await _loadChatHistory();
+  }
+
+  Future<void> _startNewChat() async {
+    if (_isLoading) {
+      _showMessage('Please wait for the current response to finish.');
+      return;
+    }
+
+    if (_isListening || _speechToText.isListening) {
+      await _stopListening();
+    }
+    if (_isSpeaking) {
+      await _stopSpeaking();
+    }
+
+    setState(() {
+      messages.clear();
+      _controller.clear();
+      _lastDiscussedLocations.clear();
+      _activeConversationId =
+          DateTime.now().microsecondsSinceEpoch.toString();
+      _activeChatLocation = widget.location;
+      _speechStatusMessage = '';
+    });
+
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+  }
+
+  Future<void> _openConversation(Map<String, dynamic> conversation) async {
+    if (_isLoading) {
+      _showMessage('Please wait for the current response to finish.');
+      return;
+    }
+
+    if (_isListening || _speechToText.isListening) {
+      await _stopListening();
+    }
+    if (_isSpeaking) {
+      await _stopSpeaking();
+    }
+
+    final storedMessages = conversation['messages'];
+    final restoredMessages = <_ChatMessage>[];
+
+    if (storedMessages is List) {
+      for (final item in storedMessages) {
+        if (item is Map) {
+          restoredMessages.add(
+            _ChatMessage(
+              text: item['text']?.toString() ?? '',
+              isUser: item['isUser'] == true,
+              isError: item['isError'] == true,
+            ),
+          );
+        }
+      }
+    }
+
+    final storedLocation =
+        conversation['location']?.toString().trim() ?? '';
+
+    setState(() {
+      messages
+        ..clear()
+        ..addAll(restoredMessages);
+      _controller.clear();
+      _activeConversationId =
+          conversation['id']?.toString() ??
+          DateTime.now().microsecondsSinceEpoch.toString();
+      _activeChatLocation =
+          storedLocation.isNotEmpty ? storedLocation : widget.location;
+      _lastDiscussedLocations
+        ..clear()
+        ..addAll(storedLocation.isNotEmpty
+            ? storedLocation.split(',').map((item) => item.trim())
+            : <String>[]);
+      _speechStatusMessage = '';
+    });
+
+    if (mounted) Navigator.of(context).pop();
+    _scrollToBottom();
+  }
+
+  Future<void> _showChatHistory() async {
+    await _loadChatHistory();
+    if (!mounted) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(sheetContext).size.height * 0.72,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 12, 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.history_rounded, size: 23),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Chat History',
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: _savedConversations.isEmpty
+                      ? const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.chat_bubble_outline_rounded,
+                                  size: 42, color: Colors.grey),
+                              SizedBox(height: 12),
+                              Text('No saved conversations yet.'),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: _savedConversations.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final conversation = _savedConversations[index];
+                            final title = conversation['title']?.toString() ??
+                                'New conversation';
+                            final location =
+                                conversation['location']?.toString() ?? '';
+                            final date = DateTime.tryParse(
+                              conversation['updatedAt']?.toString() ?? '',
+                            );
+                            final dateLabel = date == null
+                                ? ''
+                                : '${date.day}/${date.month}/${date.year}';
+
+                            return ListTile(
+                              leading: const CircleAvatar(
+                                child: Icon(Icons.chat_outlined),
+                              ),
+                              title: Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                [location, dateLabel]
+                                    .where((value) => value.isNotEmpty)
+                                    .join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onTap: () => _openConversation(conversation),
+                              trailing: IconButton(
+                                tooltip: 'Delete conversation',
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: Colors.redAccent,
+                                ),
+                                onPressed: () async {
+                                  final id =
+                                      conversation['id']?.toString() ?? '';
+                                  await _chatHistoryService
+                                      .deleteConversation(id);
+                                  await _loadChatHistory();
+                                  if (mounted) {
+                                    Navigator.of(sheetContext).pop();
+                                    _showChatHistory();
+                                  }
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   // --------------------------------------------------
@@ -668,7 +924,9 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
       return List<String>.from(_lastDiscussedLocations);
     }
 
-    final selected = widget.location.trim();
+    final selected = _activeChatLocation.trim().isNotEmpty
+        ? _activeChatLocation.trim()
+        : widget.location.trim();
 
     if (selected.isEmpty) return [];
 
@@ -825,6 +1083,9 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
 
     final conversationHistory = _buildConversationHistory();
     final activeLocations = _resolveLocations(message);
+    if (activeLocations.isNotEmpty) {
+      _activeChatLocation = activeLocations.join(', ');
+    }
 
     setState(() {
       messages.add(_ChatMessage(text: message, isUser: true));
@@ -863,6 +1124,7 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
         setState(() {
           messages.add(_ChatMessage(text: reply, isUser: false));
         });
+        await _saveCurrentConversation();
 
         if (_voiceRepliesEnabled) {
           unawaited(_speakReply(reply));
@@ -893,6 +1155,7 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
       debugPrint('WeatherGPT error: $error');
     } finally {
       if (mounted) {
+        await _saveCurrentConversation();
         setState(() {
           _isLoading = false;
         });
@@ -1019,7 +1282,7 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
                       ),
                     ),
                     Text(
-                      '${t('Weather assistant')} · ${widget.location}',
+                      '${t('Weather assistant')} · $_activeChatLocation',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1035,6 +1298,22 @@ class _WeatherGPTScreenState extends State<WeatherGPTScreen> {
             ],
           ),
           actions: [
+            IconButton(
+              onPressed: _showChatHistory,
+              tooltip: t('Chat history'),
+              icon: Icon(
+                Icons.history_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            IconButton(
+              onPressed: _startNewChat,
+              tooltip: t('New chat'),
+              icon: Icon(
+                Icons.add_comment_outlined,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             PopupMenuButton<String>(
               tooltip: t('Speech input language'),
               initialValue: _speechLocaleId,
