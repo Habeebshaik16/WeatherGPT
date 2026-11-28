@@ -67,3 +67,4 @@ ios_template/
 # Temporary iOS backup and template folders
 ios_backup/
 ios_template/
+ios_damaged_backup/
