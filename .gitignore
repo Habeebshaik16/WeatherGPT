@@ -60,3 +60,10 @@ ios/Runner/GeneratedPluginRegistrant.*
 macos/Flutter/ephemeral/
 macos/Flutter/GeneratedPluginRegistrant.swift
 assets/desktop.ini
+# Temporary iOS backup and template folders
+ios_backup/
+ios_template/
+
+# Temporary iOS backup and template folders
+ios_backup/
+ios_template/

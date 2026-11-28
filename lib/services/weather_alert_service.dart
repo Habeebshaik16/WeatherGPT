@@ -1,10 +1,10 @@
 
-import 'dart:js_interop';
-
-import 'package:web/web.dart' as web;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/weather_model.dart';
+import 'weather_notification_service_stub.dart'
+    if (dart.library.js_interop) 'weather_notification_service_web.dart'
+    as notifications;
 
 enum WeatherAlertLevel {
   advisory,
@@ -40,7 +40,8 @@ class WeatherAlertService {
 
   static const Duration _alertCooldown = Duration(hours: 3);
 
-  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
+  final SharedPreferencesAsync _preferences =
+      SharedPreferencesAsync();
 
   bool _enabled = true;
 
@@ -57,7 +58,8 @@ class WeatherAlertService {
 
   bool get enabled => _enabled;
 
-  Map<String, bool> get categories => Map.unmodifiable(_categories);
+  Map<String, bool> get categories =>
+      Map.unmodifiable(_categories);
 
   Future<void> initialize() async {
     _enabled = await _preferences.getBool(_enabledKey) ?? true;
@@ -67,22 +69,29 @@ class WeatherAlertService {
 
     if (savedCategories != null) {
       for (final category in _categories.keys) {
-        _categories[category] = savedCategories.contains(category);
+        _categories[category] =
+            savedCategories.contains(category);
       }
     }
   }
 
   Future<bool> setEnabled(bool value) async {
     _enabled = value;
+
     await _preferences.setBool(_enabledKey, value);
 
     if (!value) return true;
 
-    return requestNotificationPermission();
+    return notifications.requestNotificationPermission();
   }
 
-  Future<bool> setCategory(String category, bool value) async {
-    if (!_categories.containsKey(category)) return false;
+  Future<bool> setCategory(
+    String category,
+    bool value,
+  ) async {
+    if (!_categories.containsKey(category)) {
+      return false;
+    }
 
     _categories[category] = value;
 
@@ -100,18 +109,7 @@ class WeatherAlertService {
   }
 
   Future<bool> requestNotificationPermission() async {
-    try {
-      if (web.Notification.permission == 'granted') {
-        return true;
-      }
-
-      final permission =
-          await web.Notification.requestPermission().toDart;
-
-      return permission.toDart == 'granted';
-    } catch (_) {
-      return false;
-    }
+    return notifications.requestNotificationPermission();
   }
 
   List<WeatherAlert> detectAlerts(WeatherModel weather) {
@@ -233,7 +231,9 @@ class WeatherAlertService {
     }
 
     // Snow and ice
-    if ((code >= 71 && code <= 77) || code == 85 || code == 86) {
+    if ((code >= 71 && code <= 77) ||
+        code == 85 ||
+        code == 86) {
       addAlert(
         id: 'snow',
         category: 'snow',
@@ -244,7 +244,7 @@ class WeatherAlertService {
       );
     }
 
-    // Dust and sand conditions
+    // Dust and sand
     if (code >= 30 && code <= 35) {
       addAlert(
         id: 'dust_storm',
@@ -270,31 +270,35 @@ class WeatherAlertService {
   }
 
   Future<void> _sendNotification(WeatherAlert alert) async {
-    final storageKey = '$_lastAlertTimeKeyPrefix${alert.id}';
+    final storageKey =
+        '$_lastAlertTimeKeyPrefix${alert.id}';
 
-    final previousTime = await _preferences.getInt(storageKey);
+    final previousTime =
+        await _preferences.getInt(storageKey);
+
     final now = DateTime.now().millisecondsSinceEpoch;
 
     if (previousTime != null) {
-      final elapsed = Duration(milliseconds: now - previousTime);
+      final elapsed =
+          Duration(milliseconds: now - previousTime);
 
       if (elapsed < _alertCooldown) return;
     }
 
-    try {
-      if (web.Notification.permission != 'granted') return;
+    if (!notifications.notificationPermissionGranted) {
+      return;
+    }
 
-      web.Notification(
+    try {
+      notifications.showNotification(
         alert.title,
-        web.NotificationOptions(
-          body: alert.message,
-          tag: alert.id,
-        ),
+        alert.message,
+        alert.id,
       );
 
       await _preferences.setInt(storageKey, now);
     } catch (_) {
-      // Browser notifications may be unavailable or blocked.
+      // Notification may be unavailable or blocked.
     }
   }
 }
